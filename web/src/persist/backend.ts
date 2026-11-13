@@ -47,7 +47,12 @@ export const newKey = projectId;
 declare global {
   interface Window { orcaDesktop?: { version: number;
     onBeforeClose?(handler: () => Promise<void>): () => void; flushBeforeClose?(): Promise<void>;
-    bambuConnect?(jobId: string, filename: string): Promise<void> } }
+    bambuConnect?(jobId: string, filename: string): Promise<void>;
+    spaceMouse?: boolean;
+    onSpaceMouse?(cb: (bytes: number[]) => void): () => void;
+    onSpaceMouseStatus?(cb: (status: 'listening' | 'error' | 'off' | 'starting') => void): () => void;
+    spaceMouseStatus?(): Promise<'listening' | 'error' | 'off' | 'starting'>;
+  } }
 }
 const storageListeners = new Set<() => void>();
 let pendingReferenceWrites = 0;
