@@ -10,7 +10,9 @@ import { preloadCovers, preloadImages, printerCatalog } from './profiles/catalog
 import { printerCover } from './profiles/metadata';
 import { listProfiles } from './profiles/pickerSource';
 import { getState, resolvePreset } from './state/store';
+import { installSpaceMouse } from './plater/spaceMouse';
 export function start() {
+  installSpaceMouse();
   void initialiseSavedPreferences().catch(() => {});
 
   void loadTab('process').catch(() => {});

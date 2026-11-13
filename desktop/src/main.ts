@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { spaceMouseState, startSpaceMouse, stopSpaceMouse } from './spaceMouse';
 
 const MAC = process.platform === 'darwin';
 const EXE = process.platform === 'win32' ? '.exe' : '';
@@ -302,7 +303,29 @@ function menu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function allowSpaceMouse(target: Electron.Session) {
+  const local = (value: string) => { try { return new URL(value).origin === DESKTOP_ORIGIN; } catch { return false; } };
+  const allowed = new Set(['fullscreen', 'pointerLock', 'clipboard-sanitized-write', 'clipboard-read']);
+  target.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+    if (permission === 'hid') return local(requestingOrigin);
+    return !new Set(['media', 'geolocation', 'notifications', 'midi', 'midiSysex', 'idle-detection', 'display-capture']).has(permission);
+  });
+  target.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (permission === 'hid') { callback(local(details.requestingUrl || webContents?.getURL() || '')); return; }
+    callback(allowed.has(permission));
+  });
+  target.setDevicePermissionHandler((details) => {
+    if (details.deviceType !== 'hid' || !local(details.origin)) return false;
+    const vendor = 'vendorId' in details.device ? details.device.vendorId : 0;
+    return vendor === 0x256f || vendor === 0x046d;
+  });
+}
+
 function ipc() {
+  ipcMain.handle('orca-desktop:spacemouse-status', (e) => {
+    if (origin && new URL(e.senderFrame?.url ?? 'about:blank').origin !== origin) throw new Error('not the app');
+    return spaceMouseState();
+  });
   ipcMain.handle('orca-desktop:bambu-connect', (e, jobId: unknown, filename: unknown) => {
     if (!origin || new URL(e.senderFrame?.url ?? 'about:blank').origin !== origin) throw new Error('not the app');
     return openInBambuConnect(jobId, filename);
@@ -355,6 +378,7 @@ async function start() {
   if (app.commandLine.hasSwitch('service-only')) { origin = await serving; return; }
   const rendererSession = session.fromPartition('orca-service-renderer', { cache: false });
   restrictNetwork(rendererSession);
+  allowSpaceMouse(rendererSession);
   if (rendererSession.isPersistent() || rendererSession.getStoragePath() !== null) throw new Error('Oops! The app window needs an isolated in-memory session to run safely.');
   win = new BrowserWindow({
     width: 1440,
@@ -374,6 +398,7 @@ async function start() {
     else void prepareQuit();
   });
   win.on('closed', () => { win = null; });
+  if (process.platform === 'win32') void startSpaceMouse(() => win);
   const contents = win.webContents;
   contents.on('console-message', (details) => {
     if (details.level === 'warning' || details.level === 'error')
@@ -409,7 +434,7 @@ app.on('before-quit', (e) => {
   e.preventDefault();
   void prepareQuit();
 });
-app.on('will-quit', () => void stopServer());
+app.on('will-quit', () => { stopSpaceMouse(); void stopServer(); });
 process.on('exit', () => void stopServer());
 process.on('SIGTERM', () => app.quit());
 process.on('SIGINT', () => app.quit());

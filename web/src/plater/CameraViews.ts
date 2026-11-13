@@ -4,6 +4,7 @@ import { autoPerspective, cameraPrefs, cameraProjection, perspective, subscribeC
 import { getState, subscribeStore } from '../state/store';
 import { bedBounds } from './geometry';
 import { ownsKeys } from '../keys';
+import { attachSpaceMouse, type SpaceSample } from './spaceMouse';
 
 const registry = new Set<CameraViews>();
 export const activeCamera = () => [...registry].find((v) => v.isActive())?.camera ?? null;
@@ -24,6 +25,9 @@ export class CameraViews {
   private adjusting = false;
   private unsubscribe: () => void;
   private unsubscribePrefs: () => void;
+  private detachSpace: () => void;
+  private spaceMoving = false;
+  private spaceIdle: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private host: HTMLElement, private active: () => boolean, private changed: () => void) {
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.5, 5000);
@@ -45,6 +49,7 @@ export class CameraViews {
     let wasActive = this.active();
     if (wasActive && lastActive) this.takePose(lastActive);
     if (wasActive) lastActive = this;
+    this.detachSpace = attachSpaceMouse(this);
     this.unsubscribe = subscribeStore(() => {
       const active = this.active();
       if (active && !wasActive) {
@@ -252,6 +257,62 @@ export class CameraViews {
     this.changed();
   }
 
+  applySpace(sample: SpaceSample) {
+    if (!this.active() || !this.controls.enabled) return;
+    const { translation, rotation, button } = sample;
+    const camera = this.camera;
+    const span = camera instanceof THREE.OrthographicCamera
+      ? (camera.top - camera.bottom) / Math.max(camera.zoom, 1e-6)
+      : Math.max(camera.position.distanceTo(this.controls.target), 1);
+    let moved = false;
+    if (translation && (translation[0] !== 0 || translation[2] !== 0)) {
+      camera.updateMatrixWorld();
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      const delta = new THREE.Vector3().addScaledVector(right, translation[0] * span * 2.5 / 300).addScaledVector(up, translation[2] * span * 2.5 / 300);
+      camera.position.add(delta);
+      this.controls.target.add(delta);
+      moved = true;
+    }
+    if (translation && translation[1] !== 0) {
+      const step = Math.max(-4, Math.min(4, 0.1 * translation[1]));
+      const factor = 1 / (1 - step * 0.1);
+      if (camera instanceof THREE.OrthographicCamera) {
+        camera.zoom = THREE.MathUtils.clamp(camera.zoom * factor, this.controls.minZoom, this.controls.maxZoom);
+        camera.updateProjectionMatrix();
+      } else {
+        const offset = camera.position.clone().sub(this.controls.target);
+        camera.position.copy(this.controls.target).add(offset.multiplyScalar(1 / factor));
+      }
+      moved = true;
+    }
+    if (rotation) {
+      const turn = new THREE.Vector3(rotation[0], -rotation[2], rotation[1]).multiplyScalar(cameraPrefs.orbitMult * Math.PI / 180);
+      const angle = turn.length();
+      if (angle > 1e-8) {
+        const offset = camera.position.clone().sub(this.controls.target).applyAxisAngle(turn.normalize(), angle);
+        if (offset.lengthSq() > 1e-8) {
+          camera.up.set(0, 0, 1);
+          camera.position.copy(this.controls.target).add(offset);
+          moved = true;
+        }
+      }
+    }
+    if (!moved && button !== 0 && button !== 1) return;
+    if (!this.spaceMoving) {
+      this.spaceMoving = true;
+      this.controls.dispatchEvent({ type: 'start' });
+    }
+    clearTimeout(this.spaceIdle);
+    this.spaceIdle = setTimeout(() => {
+      this.spaceMoving = false;
+      this.controls.dispatchEvent({ type: 'end' });
+    }, 180);
+    if (moved) this.controls.update();
+    if (button === 0) this.zoom(1 / 0.9);
+    else if (button === 1) this.zoom(1 / 1.1);
+  }
+
   zoom(factor: number) {
     if (this.camera instanceof THREE.OrthographicCamera) {
       this.camera.zoom = THREE.MathUtils.clamp(this.camera.zoom * factor, this.controls.minZoom, this.controls.maxZoom);
@@ -366,6 +427,8 @@ export class CameraViews {
     return false;
   }
   dispose() {
+    clearTimeout(this.spaceIdle);
+    this.detachSpace();
     registry.delete(this);
     if (lastActive === this) lastActive = null;
     window.removeEventListener('camera-command', this.onCommand);

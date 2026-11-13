@@ -1,7 +1,8 @@
 import { savePreferences } from '../saved-preferences';
 import { preloadable } from '../preloadable';
 import { Check } from './Check';
-import { Suspense, useState, useSyncExternalStore } from 'react';
+import { Suspense, useEffect, useState, useSyncExternalStore } from 'react';
+import { connectSpaceMouse, installSpaceMouse, spaceMouseSnapshot, subscribeSpaceMouse } from '../plater/spaceMouse';
 import { markStale, setState, useStore } from '../state/store';
 import { setThemePref, subscribeTheme, themePref, type ThemePref } from '../theme';
 import { cameraPrefsSnapshot, setCameraPrefs, subscribeCamera, type CameraPrefs } from '../camera';
@@ -30,6 +31,17 @@ function setDeveloperMode(developerMode: boolean) {
   setState({ developerMode });
 }
 
+function SpaceMousePreference() {
+  const status = useSyncExternalStore(subscribeSpaceMouse, spaceMouseSnapshot);
+  useEffect(() => { installSpaceMouse(); }, []);
+  const label = status === 'connected' ? 'Connected' : status === 'desktop' ? 'On' : status === 'unsupported' ? 'Desktop app or Chrome' : '';
+  return (
+    <div className="form-row"><span>SpaceMouse<InfoTip label="SpaceMouse">{'Push the cap to pan and zoom. Tilt and twist to orbit. The desktop app reads it while 3Dconnexion software is running.'}</InfoTip></span>
+      {label ? <span>{label}</span> : <button type="button" className="btn" onClick={() => void connectSpaceMouse()}>{status === 'busy' ? 'Connecting…' : 'Connect'}</button>}
+    </div>
+  );
+}
+
 function setMixedTemperatures(on: boolean) {
   savePreferences({'orca.enable_high_low_temp_mixed_printing':on ? '1' : '0'});
   setState((s) => ({ mixedTemperatures: on, job: markStale(s.job) }));
@@ -56,6 +68,7 @@ function Preferences() {
             onChange={(e) => { const v = Number(e.target.value); if (v >= 0.05 && v <= 2) setCameraPrefs({ orbitMult: v }); }} /></label>
         <label className="modal-check"><Check checked={camera.zoomToMouse} onCheckedChange={(next) => setCameraPrefs({ zoomToMouse: next })} />Zoom to mouse position</label>
         <label className="modal-check"><Check checked={camera.reverseZoom} onCheckedChange={(next) => setCameraPrefs({ reverseZoom: next })} />Reverse zoom direction</label>
+        <SpaceMousePreference />
         <h3 className="modal-group">Advanced</h3>
         <label className="modal-check"><Check checked={developerMode} onCheckedChange={(next) => setDeveloperMode(next)} />Developer mode</label>
         {canMix && <label className="modal-check"><Check checked={mixed} onCheckedChange={(next) => setMixedTemperatures(next)} />Allow mixed filament temperatures</label>}

@@ -23,6 +23,18 @@ ipcRenderer.on('orca-desktop:menu', (_e, command: string) => {
 contextBridge.exposeInMainWorld('orcaDesktop', {
   version: 1,
   platform: process.platform,
+  spaceMouse: process.platform === 'win32',
+  onSpaceMouse(cb: (bytes: number[]) => void) {
+    const handler = (_event: unknown, bytes: number[]) => cb(bytes);
+    ipcRenderer.on('orca-desktop:spacemouse', handler);
+    return () => { ipcRenderer.removeListener('orca-desktop:spacemouse', handler); };
+  },
+  onSpaceMouseStatus(cb: (status: 'listening' | 'error' | 'off' | 'starting') => void) {
+    const handler = (_event: unknown, status: 'listening' | 'error' | 'off' | 'starting') => cb(status);
+    ipcRenderer.on('orca-desktop:spacemouse-status', handler);
+    return () => { ipcRenderer.removeListener('orca-desktop:spacemouse-status', handler); };
+  },
+  spaceMouseStatus: (): Promise<'listening' | 'error' | 'off' | 'starting'> => ipcRenderer.invoke('orca-desktop:spacemouse-status'),
 
 
   bambuConnect: (jobId: string, filename: string): Promise<void> => ipcRenderer.invoke('orca-desktop:bambu-connect', jobId, filename),
